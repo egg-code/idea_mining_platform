@@ -1,0 +1,14 @@
+app_ideas:
+
+  target: dev
+
+  outputs:
+    dev:
+      type: postgres
+      host: postgres
+      user: admin
+      password: super_admin
+      port: 5432
+      dbname: app_ideas
+      schema: staging
+      threads: 4

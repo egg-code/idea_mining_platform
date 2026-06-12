@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Environment Variables
+.env
+
+# Logs
+logs/
+*.log
+dbt/logs/
+
+# dbt generated files
+dbt/target/
+dbt/dbt_packages/
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python build files
+build/
+dist/
+*.egg-info/
+
+# PostgreSQL data
+pgdata/
+postgres_data/
+
+# Local AI models
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# Data files
+data/
+*.csv
+*.parquet
+*.xlsx
+
+# Cache
+.cache/
+.pytest_cache/

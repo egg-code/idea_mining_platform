@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+
+  postgres: # Database service using PostgreSQL 16 
+    image: postgres:16
+    container_name: idea_mining_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: super_admin
+      POSTGRES_DB: app_ideas
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d # Initialize the database with schema and tables
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d app_ideas"] # Check if PostgreSQL is ready to accept connections
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped # Restart the container unless it is explicitly stopped
+
+
+  ollama: # Ollama service for data processing
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama_data:/root/.ollama # Persist Ollama data
+    restart: unless-stopped # Restart the container unless it is explicitly stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"] # Check if Ollama API is responsive
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+
+
+  reddit_pipeline: # Service for running the Reddit data extraction pipeline
+    build: .
+    container_name: pipeline_runner
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment: # Passing the internal docker network names directly into script environment
+      - DB_USER=admin
+      - DB_PASSWORD=super_admin
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=app_ideas
+      - LLM_ENDPOINT=http://ollama:11434/v1/chat/completions
+      - LLM_MODEL=llama3.2:3b
+      # Reddit API credentials (Passed from local .env file)
+      - REDDIT_CLIENT_ID=${CLIENT_ID}
+      - REDDIT_CLIENT_SECRET=${CLIENT_SECRET}
+      - REDDIT_USER_AGENT=${USER_AGENT}
+    # Runs as a one-shot command, not a long-running service
+    command: ["python", "main.py"]
+
+
+  dbt: # Service for running dbt transformations
+    image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+    container_name: dbt_transformer
+    tty: true
+    volumes:
+      - ./dbt:/usr/app
+    working_dir: /usr/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  ollama_data:

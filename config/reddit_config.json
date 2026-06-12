@@ -1,0 +1,83 @@
+{
+  "subreddits": [
+    "findanapp",
+    "software",
+    "apps",
+    "androidapps",
+    "iosapps",
+    "selfhosted",
+    "InternetIsBeautiful",
+
+    "sysadmin",
+    "devops",
+    "webdev",
+    "dataengineering",
+    "datascience",
+    "analytics",
+
+    "productivity",
+    "projectmanagement",
+    "remotework",
+    "digitalnomad",
+
+    "entrepreneur",
+    "startups"
+  ],
+
+  "search_terms": [
+
+    "is there an app that",
+    "is there any app that",
+    "looking for an app that",
+    "need an app to",
+    "recommend an app for",
+    "app that can",
+    "best app for",
+    "any app for",
+
+    "looking for software that",
+    "software that can",
+    "need software to",
+    "need a tool to",
+    "tool that can",
+    "website that can",
+    "platform that can",
+
+    "i wish there was an app",
+    "i wish there was software",
+    "there should be an app",
+    "why isn't there an app",
+    "does anything exist that",
+    "looking for a way to automate",
+    "looking for a way to track",
+    "need a way to automate",
+    "need a way to track",
+
+    "how do you manage X currently",
+    "how do you track X",
+    "how do you organize X",
+    "how do you automate X",
+
+    "what do you use for",
+    "how are you handling X",
+    "any better way to X",
+
+    "time consuming manual process",
+    "repetitive task that",
+    "spreadsheet for tracking",
+    "excel for tracking",
+    "workflow for managing",
+
+    "currently using spreadsheet",
+    "currently using excel",
+    "alternative to [tool]",
+    "replacement for [tool]",
+
+    "feature request",
+    "missing feature",
+    "lack of feature"
+  ],
+
+  "limit_per_query" : 100
+}
+
