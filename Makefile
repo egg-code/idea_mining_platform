@@ -53,7 +53,7 @@ llm:
 
 dbt-marts:
 	@echo "Step 4: Building marts..."
-	docker compose run --rm dbt dbt run --select marts
+	docker compose run --rm dbt run --select marts
 
 audit:
 	@echo "Audit: Reviewing LLM outputs for quality..."

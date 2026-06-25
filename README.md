@@ -10,6 +10,7 @@ Mine Reddit posts at scale, enrich them with AI-driven product analysis, and sur
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Key Optimizations & Resilience](#key-optimizations--resilience)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Data Model](#data-model)
@@ -18,17 +19,10 @@ Mine Reddit posts at scale, enrich them with AI-driven product analysis, and sur
   - [Environment Setup](#environment-setup)
   - [Quick Start](#quick-start)
 - [Pipeline Guide](#pipeline-guide)
-  - [Step 1 — Ingest Reddit Posts](#step-1--ingest-reddit-posts)
-  - [Step 2 — dbt Staging Transformation](#step-2--dbt-staging-transformation)
-  - [Step 3 — LLM Enrichment](#step-3--llm-enrichment)
-  - [Step 4 — dbt Marts](#step-4--dbt-marts)
-  - [Full Pipeline](#full-pipeline)
-- [LLM Analysis Output Schema](#llm-analysis-output-schema)
+- [Data Quality Audit](#data-quality-audit)
 - [Configuration](#configuration)
-  - [Reddit Config](#reddit-config)
-  - [LLM Prompt Engineering](#llm-prompt-engineering)
+- [LLM Analysis Output Schema](#llm-analysis-output-schema)
 - [Useful Commands](#useful-commands)
-- [Contributing](#contributing)
 - [License](#license)
 
 ---
@@ -41,7 +35,7 @@ People on Reddit constantly ask for tools that don't exist, complain about broke
 
 1. **Extracts** thousands of posts from targeted subreddits using the Reddit API (PRAW)
 2. **Cleans** raw data through dbt staging transformations
-3. **Enriches** each post with structured product-opportunity analysis via LLM (Groq / Ollama)
+3. **Enriches** each post with structured product-opportunity analysis via LLM (Groq API / Ollama)
 4. **Surfaces** the highest-signal ideas ranked by pain intensity, confidence, and community engagement
 
 The result is a curated database of product ideas with problem statements, target audiences, monetization models, and competitive analysis — ready for product teams, indie hackers, and investors.
@@ -50,7 +44,7 @@ The result is a curated database of product ideas with problem statements, targe
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Docker Compose                           │
 │                                                                 │
@@ -69,10 +63,23 @@ The result is a curated database of product ideas with problem statements, targe
 
 ### Data Flow
 
-```
+```text
 Reddit API ──▶ raw.subreddit_data ──▶ staging.cleaned_reddit ──▶ staging.llm_outputs ──▶ marts.analysis_ideas
    (PRAW)         (Python upsert)        (dbt staging)            (LLM processor)         (dbt marts)
 ```
+
+---
+
+## Key Optimizations & Resilience
+
+This pipeline is engineered for production-grade reliability, featuring several advanced optimizations:
+
+1. **Idempotent Ingestion (`ON CONFLICT DO NOTHING`)**: The Reddit extractor uses a custom SQLAlchemy upsert method. You can run ingestion as many times as you want without crashing the database or duplicating primary keys (`post_id`).
+2. **Decoupled Orchestration (`main.py`)**: Python services are split into `--mode ingest` and `--mode llm`. This allows dbt transformations to run *between* extraction and LLM processing.
+3. **Adaptive LLM Rate Limiting**: Instead of naive fixed sleep times, the LLM processor actively parses Groq API headers (`x-ratelimit-remaining-tokens`, `reset-requests`). It dynamically pauses execution *only* when the token budget is near exhaustion.
+4. **Dynamic Context Chunking**: Posts are dynamically batched into the LLM context window based on exact character counts (7,000 char chunks) rather than a fixed number of posts. This maximizes token usage without triggering payload limits.
+5. **Custom DBT Schema Routing**: Uses a custom `generate_schema_name.sql` macro to bypass default dbt behavior, ensuring tables compile directly into `staging` and `marts` without user-prefixed schemas (e.g., preventing `dev_marts`).
+6. **Data Quality Auditing**: Includes a comprehensive SQL audit script (`make audit`) to monitor LLM hallucination rates, null distributions, and classification accuracy.
 
 ---
 
@@ -93,7 +100,7 @@ Reddit API ──▶ raw.subreddit_data ──▶ staging.cleaned_reddit ──�
 
 ## Project Structure
 
-```
+```text
 idea_mining_platform/
 │
 ├── main.py                          # Pipeline entry point (ingest / llm modes)
@@ -101,12 +108,14 @@ idea_mining_platform/
 ├── docker-compose.yml               # Multi-service orchestration
 ├── Makefile                         # Pipeline shortcuts (make ingest, make llm, etc.)
 ├── requirements.txt                 # Python dependencies
-├── .env                             # API keys (gitignored)
+├── .env                             # Real API keys (gitignored)
+├── .env.example                     # Template config for safe sharing
 ├── .gitignore
 │
 ├── scripts/
 │   ├── reddit_e.py                  # Reddit extraction via PRAW
-│   └── llm_processor.py            # LLM enrichment engine (chunking + retry)
+│   ├── llm_processor.py             # LLM enrichment engine (chunking + retry)
+│   └── audit_data_quality.sql       # Pipeline QA queries
 │
 ├── config/
 │   ├── reddit_config.json           # Subreddits & search terms
@@ -123,7 +132,8 @@ idea_mining_platform/
         ├── models/
         │   ├── source.yml           # Source definitions & tests
         │   ├── staging/
-        │   │   └── cleaned_reddit.sql   # Staging: clean raw posts
+        │   │   ├── cleaned_reddit.sql   # Staging: clean raw posts
+        │   │   └── schema.yml
         │   └── marts/
         │       └── analysis_ideas.sql   # Mart: enriched idea analysis
         └── macros/
@@ -146,24 +156,13 @@ The platform uses a **layered data warehouse** pattern with three schemas:
 #### `staging` — Cleaned & enriched data
 | Table | Description |
 |-------|-------------|
-| `cleaned_reddit` | dbt-transformed posts with proper timestamps (materialized table) |
+| `cleaned_reddit` | dbt-transformed posts with proper timestamps (`to_timestamp` cast) |
 | `llm_outputs` | LLM analysis results per post (FK → subreddit_data, ON DELETE CASCADE) |
 
 #### `marts` — Business-ready analytics
 | Table | Description |
 |-------|-------------|
 | `analysis_ideas` | Joined view of validated ideas ranked by pain × confidence × score |
-
-### Entity Relationship
-
-```
-raw.subreddit_data (1) ──── (0..1) staging.llm_outputs
-        │                              │
-        └──── staging.cleaned_reddit ──┘
-                      │
-              marts.analysis_ideas
-              (only is_valid_idea = true)
-```
 
 ---
 
@@ -188,18 +187,14 @@ raw.subreddit_data (1) ──── (0..1) staging.llm_outputs
    cp .env.example .env
    ```
 
-   Fill in your credentials:
-   ```env
-   # Reddit API
-   CLIENT_ID=your_reddit_client_id
-   CLIENT_SECRET=your_reddit_client_secret
-   USER_AGENT=AppIntelExplorer/1.0 by your-username
+3. **Fill in your credentials in `.env`:**
+   Your `.env` must contain the following variables:
+   * `LLM_PROVIDER` (`cloud` or `local`)
+   * `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_API_URL`
+   * `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`
+   * `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`
 
-   # LLM Provider
-   GROQ_API_KEY=your_groq_api_key
-   ```
-
-3. **Build the containers:**
+4. **Build the containers:**
    ```bash
    make build
    ```
@@ -212,14 +207,7 @@ Run the entire pipeline end-to-end with a single command:
 make pipeline
 ```
 
-This will:
-1. Start PostgreSQL + Ollama services
-2. Ingest Reddit posts → `raw.subreddit_data`
-3. Run dbt staging → `staging.cleaned_reddit`
-4. Run LLM enrichment → `staging.llm_outputs`
-5. Build dbt marts → `marts.analysis_ideas`
-
-Check results:
+Check pipeline progression:
 ```bash
 make status
 ```
@@ -236,8 +224,7 @@ make ingest
 
 - Connects to the Reddit API via PRAW
 - Searches across **18 subreddits** using **30+ search queries** (see `config/reddit_config.json`)
-- Deduplicates posts by `post_id`
-- Upserts into `raw.subreddit_data` (skips existing posts via `ON CONFLICT DO NOTHING`)
+- Upserts safely into `raw.subreddit_data` without duplicating `post_id`.
 
 ### Step 2 — dbt Staging Transformation
 
@@ -245,7 +232,7 @@ make ingest
 make dbt-staging
 ```
 
-- Converts `created_utc` (Unix epoch float) → proper `TIMESTAMP`
+- Converts `created_utc` (Unix epoch float) → proper `TIMESTAMP WITH TIME ZONE`
 - Materializes as a table in `staging.cleaned_reddit`
 
 ### Step 3 — LLM Enrichment
@@ -255,11 +242,9 @@ make llm
 ```
 
 - Fetches unprocessed posts (no matching row in `staging.llm_outputs`)
-- Processes in **chunks of 5 posts per API call** (free-tier safe)
-- Each post is analyzed by the LLM with a structured product-strategist prompt
-- Implements retry logic with exponential backoff + 429 rate-limit handling
-- Results are sanitized (enum validation, score clamping) before database insert
-- **Rate limiting**: 2.5s sleep between chunks to stay under Groq's 30 req/min free tier
+- Groups posts dynamically into 7,000 character chunks.
+- The LLM parses the chunk and extracts structured JSON product analysis.
+- **Adaptive Rate Limiting**: The script monitors Groq's token reset headers, only pausing execution when token budgets drop below 2000.
 
 ### Step 4 — dbt Marts
 
@@ -267,17 +252,40 @@ make llm
 make dbt-marts
 ```
 
-- Joins `cleaned_reddit` + `llm_outputs`
-- Filters to `is_valid_idea = true` only
-- Orders by `pain_intensity DESC`, `confidence_score DESC`, `score DESC`
+- Joins `staging.cleaned_reddit` + `staging.llm_outputs`
+- Filters out non-ideas (`is_valid_idea = true`)
+- Orders by `pain_intensity DESC`, `confidence_score DESC`
 - Materializes in `marts.analysis_ideas`
 
-### Full Pipeline
+---
+
+## Data Quality Audit
+
+To monitor the performance of the LLM and the health of your dataset, we included a comprehensive SQL audit script.
 
 ```bash
-make pipeline    # Runs all 4 steps sequentially
-make status      # Shows row counts across all tables
+make audit
 ```
+
+This will output a terminal report covering:
+1. **Valid vs Invalid Idea Split** (Hit rate of the LLM classification)
+2. **Confidence Score & Pain Intensity Distribution**
+3. **Missing Value Check** (Detects LLM hallucinations/omissions for key fields)
+4. **Spot Checks** (Displays the top 10 highest confidence ideas and borderline cases directly in the console)
+
+---
+
+## Configuration
+
+### Reddit Config
+Edit `config/reddit_config.json` to customize subreddits, search terms, and the `limit_per_query` cap.
+
+### LLM Prompt Engineering
+The system prompt in `config/prompts.py` is carefully engineered with:
+1. **Role framing** — "Senior product strategist at a venture studio"
+2. **Scoring rubrics** — Numeric scales with anchor examples for consistency
+3. **Market signal extraction** — Looks for buying signals, frustration words, budget mentions
+4. **Explicit null handling** — Prevents hallucinated fields for non-ideas
 
 ---
 
@@ -304,96 +312,22 @@ Each Reddit post is analyzed and scored across these dimensions:
 
 ---
 
-## Configuration
-
-### Reddit Config
-
-Edit `config/reddit_config.json` to customize:
-
-- **`subreddits`** — Which subreddits to scrape (currently 18 communities covering apps, devops, productivity, startups)
-- **`search_terms`** — Natural language queries like *"is there an app that"*, *"need a tool to"*, *"I wish there was"* (currently 30+ patterns)
-- **`limit_per_query`** — Max posts per search term per subreddit (default: 100)
-
-### LLM Prompt Engineering
-
-The system prompt in `config/prompts.py` is carefully engineered with:
-
-1. **Role framing** — "Senior product strategist at a venture studio"
-2. **Scoring rubrics** — Numeric scales with anchor examples for consistency
-3. **Market signal extraction** — Looks for buying signals, frustration words, budget mentions
-4. **Explicit null handling** — Prevents hallucinated fields for non-ideas
-5. **Multi-post chunking** — Processes 5 posts per API call for efficiency
-
----
-
 ## Useful Commands
 
 | Command | Description |
 |---------|-------------|
 | `make up` | Start infrastructure (PostgreSQL + Ollama) |
+| `make up-build` | Rebuild and start infrastructure |
 | `make down` | Stop all containers |
-| `make down-reset` | Stop all + **delete database volumes** |
-| `make build` | Rebuild Docker images after code changes |
-| `make ingest` | Run Reddit extraction |
-| `make dbt-staging` | Run dbt staging models |
-| `make llm` | Run LLM enrichment |
-| `make dbt-marts` | Build analytics marts |
+| `make down-reset` | Stop all + **delete database volumes** (resets everything) |
+| `make ingest` | Run Reddit extraction (`main.py --mode ingest`) |
+| `make llm` | Run LLM enrichment (`main.py --mode llm`) |
+| `make dbt-staging` | Run dbt staging models (`dbt run --select staging`) |
+| `make dbt-marts` | Build analytics marts (`dbt run --select marts`) |
 | `make pipeline` | Run full pipeline (ingest → staging → llm → marts) |
 | `make status` | Show row counts across all pipeline tables |
+| `make audit` | Run the Data Quality Audit script to verify LLM outputs |
 | `make test` | Run dbt tests |
-
----
-
-## Querying Your Ideas
-
-Once the pipeline completes, connect to PostgreSQL and explore your ideas:
-
-```bash
-# Connect to the database
-docker exec -it idea_mining_db psql -U admin -d app_ideas
-```
-
-```sql
--- Top 10 highest-pain validated ideas
-SELECT title, problem_statement, pain_intensity, confidence_score,
-       product_category, monetization_model, target_audience
-FROM marts.analysis_ideas
-ORDER BY pain_intensity DESC, confidence_score DESC
-LIMIT 10;
-
--- Ideas by product category
-SELECT product_category, COUNT(*) as idea_count,
-       ROUND(AVG(pain_intensity), 1) as avg_pain,
-       ROUND(AVG(confidence_score), 1) as avg_confidence
-FROM marts.analysis_ideas
-GROUP BY product_category
-ORDER BY idea_count DESC;
-
--- Ideas where users are willing to pay
-SELECT title, problem_statement, suggested_solution, monetization_model
-FROM marts.analysis_ideas
-WHERE willingness_to_pay = true
-ORDER BY pain_intensity DESC;
-
--- Pipeline status overview
-SELECT 'raw.subreddit_data' as layer, count(*) FROM raw.subreddit_data
-UNION ALL
-SELECT 'staging.cleaned_reddit', count(*) FROM staging.cleaned_reddit
-UNION ALL
-SELECT 'staging.llm_outputs', count(*) FROM staging.llm_outputs
-UNION ALL
-SELECT 'marts.analysis_ideas', count(*) FROM marts.analysis_ideas;
-```
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m 'Add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
 
 ---
 
