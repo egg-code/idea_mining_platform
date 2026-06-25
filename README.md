@@ -1,4 +1,4 @@
-# 💡 Idea Mining Platform
+# Idea Mining Platform
 
 > **Automated product opportunity discovery from Reddit using LLM-powered analysis.**
 
@@ -6,7 +6,7 @@ Mine Reddit posts at scale, enrich them with AI-driven product analysis, and sur
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
