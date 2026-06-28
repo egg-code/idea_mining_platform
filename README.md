@@ -48,24 +48,29 @@ The result is a curated database of product ideas with problem statements, targe
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Docker Compose                           │
 │                                                                 │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────────┐  │
-│  │  Reddit   │───▶│  PostgreSQL  │◀───│    dbt (Staging +    │  │
-│  │  Ingest   │    │     (DB)     │    │       Marts)         │  │
-│  │  (PRAW)   │    │              │    └──────────────────────┘  │
+│  ┌──────────┐    ┌──────────────┐    ┌──────────────────────┐   │
+│  │  Reddit  │───▶│  PostgreSQL  │◀───│    dbt (Staging +    │   │
+│  │  Ingest  │    │     (DB)     │    │       Marts)         │   │
+│  │  (PRAW)  │    │              │    └──────────────────────┘   │
 │  └──────────┘    │  raw.*       │                               │
-│                  │  staging.*   │    ┌──────────────────────┐  │
-│  ┌──────────┐   │  marts.*     │◀───│    LLM Enrichment    │  │
-│  │  Ollama   │   │              │    │  (Groq API / Ollama) │  │
-│  │ (Optional)│   └──────────────┘    └──────────────────────┘  │
-│  └──────────┘                                                   │
+│                  │  staging.*   │    ┌──────────────────────┐   │
+│  ┌──────────┐    │  marts.*     │◀───│    LLM Enrichment    │   │
+│  │  Ollama  │    │              │    │  (Groq API / Ollama) │   │
+│  │(Optional)│    └──────┬───────┘    └──────────────────────┘   │
+│  └──────────┘           │                                       │
+│                         ▼                                       │
+│                  ┌──────────────┐                               │
+│                  │  Streamlit   │                               │
+│                  │ (Dashboard)  │                               │
+│                  └──────────────┘                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Data Flow
 
 ```text
-Reddit API ──▶ raw.subreddit_data ──▶ staging.cleaned_reddit ──▶ staging.llm_outputs ──▶ marts.analysis_ideas
-   (PRAW)         (Python upsert)        (dbt staging)            (LLM processor)         (dbt marts)
+Reddit API ──▶ raw.subreddit_data ──▶ staging.cleaned_reddit ──▶ staging.llm_outputs ──▶ marts.analysis_ideas ──▶ Streamlit
+   (PRAW)         (Python upsert)        (dbt staging)            (LLM processor)         (dbt marts)             Dashboard
 ```
 
 ---
@@ -92,6 +97,7 @@ This pipeline is engineered for production-grade reliability, featuring several 
 | **Data Transformation** | dbt (1.9.0) | SQL-based staging & mart models |
 | **Reddit API** | PRAW | Reddit post extraction |
 | **LLM Inference** | Groq API / Ollama | Product opportunity analysis |
+| **Dashboard** | Streamlit | Interactive data visualization & filtering |
 | **Containerization** | Docker Compose | Service orchestration |
 | **ORM** | SQLAlchemy 2.0 | Database connectivity |
 | **Build Tool** | Make | Pipeline command shortcuts |
@@ -111,6 +117,11 @@ idea_mining_platform/
 ├── .env                             # Real API keys (gitignored)
 ├── .env.example                     # Template config for safe sharing
 ├── .gitignore
+│
+├── dashboard/                       # Streamlit dashboard application
+│   ├── app.py                       # Dashboard interactive visualizer
+│   ├── requirements.txt             # Dashboard python dependencies
+│   └── Dockerfile                   # Dashboard container configuration
 │
 ├── scripts/
 │   ├── reddit_e.py                  # Reddit extraction via PRAW
@@ -208,6 +219,7 @@ make pipeline
 ```
 
 Check pipeline progression:
+
 ```bash
 make status
 ```
@@ -256,6 +268,17 @@ make dbt-marts
 - Filters out non-ideas (`is_valid_idea = true`)
 - Orders by `pain_intensity DESC`, `confidence_score DESC`
 - Materializes in `marts.analysis_ideas`
+
+### Step 5 — Visualizing with Streamlit
+
+```bash
+make dashboard
+```
+
+- Boots up the Streamlit dashboard container (`idea_dashboard`)
+- Connects directly to `marts.analysis_ideas` in PostgreSQL
+- Provides interactive filtering by urgency, category, pain, and confidence
+- Available at `http://localhost:8501`
 
 ---
 
@@ -325,6 +348,8 @@ Each Reddit post is analyzed and scored across these dimensions:
 | `make dbt-staging` | Run dbt staging models (`dbt run --select staging`) |
 | `make dbt-marts` | Build analytics marts (`dbt run --select marts`) |
 | `make pipeline` | Run full pipeline (ingest → staging → llm → marts) |
+| `make dashboard` | Start the Streamlit dashboard on port 8501 |
+| `make dashboard-build` | Rebuild and start the dashboard container |
 | `make status` | Show row counts across all pipeline tables |
 | `make audit` | Run the Data Quality Audit script to verify LLM outputs |
 | `make test` | Run dbt tests |
@@ -338,5 +363,5 @@ This project is for educational and personal use. See [LICENSE](LICENSE) for det
 ---
 
 <p align="center">
-  Built with ❤️ by <a href="https://github.com/your-username">eggcoder</a>
+  Built by <a href="https://github.com/your-username">eggcoder</a>
 </p>

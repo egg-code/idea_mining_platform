@@ -1,4 +1,4 @@
-.PHONY: up down ingest dbt-staging llm dbt-marts pipeline status
+.PHONY: up down ingest dbt-staging llm dbt-marts pipeline status dashboard dashboard-build dashboard-down test help
 
 help:
 	@echo "Makefile Commands:"
@@ -14,6 +14,9 @@ help:
 	@echo "  pipeline      - Run the full pipeline end-to-end"
 	@echo "  status        - Check row counts in key tables"
 	@echo "  test          - Run dbt tests"
+	@echo "  dashboard     - Start the dashboard"
+	@echo "  dashboard-build - Build and start the dashboard"
+	@echo "  dashboard-down  - Stop the dashboard container"
 
 # ---- Infrastructure ----
 
@@ -80,3 +83,16 @@ status:
 
 test:
 	docker compose run --rm dbt test
+
+# ---- Dashboard ----
+dashboard:
+	@echo "Starting dashboard..."
+	docker compose up -d dashboard
+	@echo "Dashboard is running at http://localhost:8501"
+
+dashboard-build:
+	docker compose up -d --build dashboard
+
+dashboard-down:
+	@echo "Stopping dashboard container..."
+	docker compose down dashboard
